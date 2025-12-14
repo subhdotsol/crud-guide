@@ -1,8 +1,38 @@
-/target
+# Rust Build Artifacts
+/target/
+**/*.rs.bk
+*.pdb
 
+# Cargo Files
+Cargo.lock
 
-# Added by cargo
-#
-# already existing elements were commented out
+# Environment Variables
+.env
+.env.local
 
-#/target
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+
+# Test Coverage
+coverage/
+*.profraw
+*.profdata
+
+# Documentation
+/doc/
+
+# Docker
+.dockerignore
