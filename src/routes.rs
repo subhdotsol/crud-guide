@@ -10,4 +10,5 @@ pub fn create_routes() -> Router<PgPool> {
     Router::new()
         .route("/health", get(handlers::health::health))
         .route("/users", post(handlers::users::create_user))
+        .route("/users/:id" , get(handlers::users::get_user))
 }
