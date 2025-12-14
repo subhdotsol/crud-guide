@@ -1,16 +1,26 @@
 // Health check handler
 
-use axum::{http::StatusCode, Json};
+use axum::{extract::State, http::StatusCode, Json};
 use serde_json::{json, Value};
+use sqlx::PgPool;
 
 /// Health check endpoint
-/// Returns a simple JSON response to confirm the server is running
-pub async fn health() -> (StatusCode, Json<Value>) {
+/// Returns server status and database connection status
+pub async fn health(State(pool): State<PgPool>) -> (StatusCode, Json<Value>) {
+    // Test database connection with a simple query
+    let db_status = match sqlx::query("SELECT 1")
+        .fetch_one(&pool)
+        .await
+    {
+        Ok(_) => "connected",
+        Err(_) => "disconnected",
+    };
+
     (
         StatusCode::OK,
         Json(json!({
             "status": "ok",
-            "message": "Server is healthy"
+            "database": db_status
         })),
     )
 }

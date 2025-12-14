@@ -10,7 +10,7 @@ This document tracks key learnings from building a REST API with Rust, Axum, and
 |------|-------|--------|--------|
 | 1 | Axum Server Setup | ✅ Complete | Ready |
 | 2 | Health Check Route | ✅ Complete | Ready |
-| 3 | PostgreSQL Connection | ⏳ Not Started | - |
+| 3 | PostgreSQL Connection | ✅ Complete | Ready |
 | 4 | Database Schema | ⏳ Not Started | - |
 | 5 | User Struct | ⏳ Not Started | - |
 | 6 | Create User (POST) | ⏳ Not Started | - |
@@ -185,6 +185,139 @@ curl http://127.0.0.1:3000/health
 ```
 
 **Next Up:** Connect to PostgreSQL database!
+
+---
+
+### Step 3: PostgreSQL Connection ✅
+
+**Goal:** Connect Rust API to PostgreSQL database using Docker and SQLx.
+
+**What I Learned:**
+
+#### 1. **Docker Compose for Databases**
+```yaml
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+```
+- **Why Docker?** Consistent database environment, easy to start/stop
+- **Volumes**: Persist data even when container stops
+- **Health Checks**: Verify database is ready before connecting
+- **Alpine**: Lightweight Linux distribution, smaller image size
+
+#### 2. **Environment Variables with dotenvy**
+```rust
+dotenvy::dotenv().ok();
+let url = std::env::var("DATABASE_URL")?;
+```
+- **`.env` file**: Store secrets locally (gitignored!)
+- **`dotenvy`**: Loads `.env` into environment variables
+- **`.ok()`**: Ignore errors if `.env` doesn't exist (for production)
+- **Security**: Never commit database credentials to git!
+
+#### 3. **SQLx - Async SQL Toolkit**
+```rust
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "macros"] }
+```
+- **`runtime-tokio`**: Use Tokio for async operations
+- **`postgres`**: PostgreSQL driver
+- **`macros`**: Compile-time SQL validation (catches errors early!)
+- Fully async - no blocking the event loop
+
+#### 4. **Connection Pooling**
+```rust
+let pool = PgPoolOptions::new()
+    .max_connections(5)
+    .acquire_timeout(Duration::from_secs(30))
+    .connect(&database_url)
+    .await?;
+```
+- **Why Pool?** Creating connections is slow/expensive
+- **How it works**: Maintains 5 ready-to-use connections
+- **Benefits**: Much faster than connecting per-request
+- **Timeout**: Don't wait forever if database is down
+
+#### 5. **Shared State in Axum**
+```rust
+// In main.rs
+let app = routes::create_routes().with_state(pool);
+
+// In handler
+pub async fn health(State(pool): State<PgPool>) -> Response {
+    // pool is available here!
+}
+```
+- **`.with_state()`**: Makes data available to all handlers
+- **`State<T>` extractor**: Pulls state from request
+- **Type safety**: Compiler ensures types match
+- **Perfect for**: Database pools, config, shared resources
+
+#### 6. **Database Queries**
+```rust
+sqlx::query("SELECT 1")
+    .fetch_one(&pool)
+    .await
+```
+- **`sqlx::query()`**: Execute raw SQL
+- **`.fetch_one()`**: Get exactly one row
+- **`.await`**: Async operation, doesn't block
+- Returns `Result` for error handling
+
+#### 7. **Module Organization**
+```
+src/
+├── db.rs          # Database connection logic (NEW!)
+├── handlers/      # Handler functions
+├── routes.rs      # Route definitions  
+├── lib.rs         # Module exports
+└── main.rs        # Entry point
+```
+- **`db.rs`**: Centralized database setup
+- Easy to add more DB functions later
+- Separation of concerns
+
+**Key Dependencies Added:**
+- `sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "macros"] }`
+- `dotenvy = "0.15"` 
+
+**New Files Created:**
+- `docker-compose.yml` - PostgreSQL container definition
+- `.env` - Local environment variables (gitignored)
+- `src/db.rs` - Database connection pool setup
+- `SETUP_STEP3.md` - Manual setup instructions
+
+**What Works Now:**
+- ✅ PostgreSQL runs in Docker container
+- ✅ Application connects to database on startup
+- ✅ Connection pool ready for queries
+- ✅ `/health` verifies database connection
+- ✅ Proper error handling
+
+**Testing:**
+```bash
+# Start database
+docker compose up -d
+
+# Run app
+cargo run
+
+# Test health check
+curl http://127.0.0.1:3000/health
+# Returns: {"status":"ok","database":"connected"}
+```
+
+**Key Concepts Learned:**
+- **Connection Pooling**: Reuse connections for performance
+- **Async Database Operations**: Non-blocking queries with SQLx
+- **State Management**: Sharing data across handlers in Axum
+- **Environment Configuration**: Secure credential management
+- **Container Orchestration**: Running services with Docker Compose
+
+**Next Up:** Create the `users` table with SQL migrations!
 
 ---
 
