@@ -11,7 +11,7 @@ This document tracks key learnings from building a REST API with Rust, Axum, and
 | 1 | Axum Server Setup | ✅ Complete | Ready |
 | 2 | Health Check Route | ✅ Complete | Ready |
 | 3 | PostgreSQL Connection | ✅ Complete | Ready |
-| 4 | Database Schema | ⏳ Not Started | - |
+| 4 | Database Schema | ✅ Complete | Ready |
 | 5 | User Struct | ⏳ Not Started | - |
 | 6 | Create User (POST) | ⏳ Not Started | - |
 | 7 | Get User (GET) | ⏳ Not Started | - |
@@ -318,6 +318,138 @@ curl http://127.0.0.1:3000/health
 - **Container Orchestration**: Running services with Docker Compose
 
 **Next Up:** Create the `users` table with SQL migrations!
+
+---
+
+### Step 4: Create Users Table ✅
+
+**Goal:** Learn database migrations and create a users table with proper schema.
+
+**What I Learned:**
+
+#### 1. **SQLx CLI Tool**
+```bash
+cargo install sqlx-cli --no-default-features --features postgres
+```
+- **What it does**: Command-line tool for managing migrations
+- **`--no-default-features`**: Don't install all database drivers
+- **`--features postgres`**: Only PostgreSQL support
+- Installed binaries: `sqlx` and `cargo-sqlx`
+
+#### 2. **Creating Migrations**
+```bash
+sqlx migrate add create_users_table
+```
+- Creates timestamped file: `migrations/TIMESTAMP_create_users_table.sql`
+- **Timestamp**: Ensures migrations run in order
+- **Descriptive name**: Makes it easy to understand what it does
+- **Version control**: Track database changes in git!
+
+#### 3. **SQL Schema Design**
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    age INTEGER,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Field by Field:**
+- `id SERIAL PRIMARY KEY`
+  - **SERIAL**: Auto-incrementing integer (1, 2, 3...)
+  - **PRIMARY KEY**: Unique identifier + indexed + not null
+- `name VARCHAR(255) NOT NULL`
+  - **VARCHAR(255)**: Variable-length string up to 255 chars
+  - **NOT NULL**: Required field (can't be empty)
+- `email VARCHAR(255) NOT NULL UNIQUE`
+  - **UNIQUE**: No duplicate emails allowed
+  - Database enforces uniqueness
+- `age INTEGER`
+  - **INTEGER**: Whole number
+  - **Nullable**: Optional field (no NOT NULL)
+- `created_at TIMESTAMP WITH TIME ZONE`
+  - **TIMESTAMP**: Date + time
+  - **WITH TIME ZONE**: Stores timezone info
+  - **DEFAULT CURRENT_TIMESTAMP**: Auto-set on insert
+
+#### 4. **Indexes for Performance**
+```sql
+CREATE INDEX idx_users_email ON users(email);
+```
+- **Index**: Makes lookups fast (like a book index)
+- Searching by email is now O(log n) instead of O(n)
+- Unique constraint already creates index, but explicit is clearer
+
+#### 5. **Running Migrations**
+```bash
+sqlx migrate run
+```
+- Connects to database using `DATABASE_URL`
+- Checks which migrations already ran
+- Runs new migrations in order
+- Creates `_sqlx_migrations` table to track what's been run
+
+**Migration tracking table:**
+```
+_sqlx_migrations
+├── version (timestamp from filename)
+├── description
+├── installed_on
+└── success
+```
+
+#### 6. **Verifying Schema**
+```bash
+docker exec -it rust-crud-postgres psql -U postgres -d rust_crud -c "\d users"
+```
+- **\d users**: Describe table command
+- Shows columns, types, constraints
+- Confirms table structure matches migration
+
+#### 7. **Migrations as Version Control**
+- Each migration = one database change
+- Never edit old migrations (breaks history)
+- To change: create new migration
+- Can rollback with `sqlx migrate revert`
+- Team members get same database structure
+
+**Key Concepts:**
+- **Idempotent**: Safe to run multiple times
+- **Ordered**: Applied in timestamp order
+- **Tracked**: System knows what's applied
+- **Reversible**: Can rollback changes
+
+**New Files Created:**
+- `migrations/20251214202409_create_users_table.sql` - Migration file
+- `.sqlx/` directory - SQLx metadata (gitignored in production)
+
+**Database Tables:**
+- `users` - Our application data
+- `_sqlx_migrations` - Migration tracking
+
+**What Works Now:**
+- ✅ Users table exists in database
+- ✅ Schema has proper constraints
+- ✅ Email uniqueness enforced
+- ✅ Auto-incrementing IDs
+- ✅ Timestamps track creation time
+- ✅ Ready to insert data!
+
+**Verification:**
+```sql
+-- Table exists
+SELECT tablename FROM pg_tables WHERE schemaname = 'public';
+-- Returns: users, _sqlx_migrations
+
+-- Table structure correct
+\d users
+-- Shows all columns with correct types
+```
+
+**Next Up:** Create Rust `User` struct to map to this table!
 
 ---
 
