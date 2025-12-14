@@ -12,7 +12,7 @@ This document tracks key learnings from building a REST API with Rust, Axum, and
 | 2 | Health Check Route | ✅ Complete | Ready |
 | 3 | PostgreSQL Connection | ✅ Complete | Ready |
 | 4 | Database Schema | ✅ Complete | Ready |
-| 5 | User Struct | ⏳ Not Started | - |
+| 5 | User Struct | ✅ Complete | Ready |
 | 6 | Create User (POST) | ⏳ Not Started | - |
 | 7 | Get User (GET) | ⏳ Not Started | - |
 | 8 | Update User (PUT) | ⏳ Not Started | - |
@@ -450,6 +450,190 @@ SELECT tablename FROM pg_tables WHERE schemaname = 'public';
 ```
 
 **Next Up:** Create Rust `User` struct to map to this table!
+
+---
+
+### Step 5: Create User Struct ✅
+
+**Goal:** Define Rust structs that map to database tables with type safety.
+
+**What I Learned:**
+
+#### 1. **Model Organization**
+```
+src/
+├── models/
+│   ├── mod.rs          # Module exports
+│   └── user.rs         # User model
+```
+- **models/**: Central location for all data structures
+- **Separation**: Each entity gets its own file
+- **Reusable**: Import models anywhere with `use rust_crud::models::User;`
+
+#### 2. **The User Struct**
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+    pub email: String,
+    pub age: Option<i32>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+```
+
+**Field Mapping:**
+| Rust Type | SQL Type | Why |
+|-----------|----------|-----|
+| `i32` | SERIAL/INTEGER | 32-bit signed integer |
+| `String` | VARCHAR(255) | Owned string (heap-allocated) |
+| `Option<i32>` | INTEGER (nullable) | Optional value (Some or None) |
+| `DateTime<Utc>` | TIMESTAMP WITH TIME ZONE | Timezone-aware datetime |
+
+#### 3. **Derive Macros** 🪄
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+```
+Each derive adds functionality:
+
+- **`Debug`**: Print struct with `{:?}` for debugging
+- **`Clone`**: Make copies of the struct
+- **`Serialize`** (serde): Convert struct → JSON
+- **`Deserialize`** (serde): Convert JSON → struct
+- **`FromRow`** (sqlx): Map database row → struct
+
+**Why derives are magical:**
+- Compiler generates code for you
+- No boilerplate to write
+- Type-safe conversions
+
+#### 4. **Serde for JSON**
+```rust
+use serde::{Deserialize, Serialize};
+```
+- **Serialize**: Rust struct → JSON (for responses)
+- **Deserialize**: JSON → Rust struct (from requests)
+- **Automatic**: Works with Axum's `Json` extractor
+
+**Example:**
+```rust
+// Automatically becomes JSON
+let user = User { ... };
+Json(user) // Returns: {"id": 1, "name": "Alice", ...}
+```
+
+#### 5. **Chrono for Dates**
+```rust
+use chrono::{DateTime, Utc};
+pub created_at: DateTime<Utc>
+```
+- **DateTime<Utc>**: Timezone-aware datetime
+- **Utc**: Coordinated Universal Time (UTC+0)
+- **Serialize**: Becomes ISO 8601 string in JSON
+  - Example: `"2025-12-14T20:24:09Z"`
+
+#### 6. **DTOs (Data Transfer Objects)**
+```rust
+#[derive(Debug, Deserialize)]
+pub struct CreateUser {
+    pub name: String,
+    pub email: String,
+    pub age: Option<i32>,
+}
+```
+
+**Why separate DTOs?**
+- **CreateUser**: No `id` or timestamps (database generates these)
+- **UpdateUser**: All fields optional (update only what changed)
+- **User**: Full model with all fields
+
+**Prevents errors:**
+- Client can't set their own ID ✅
+- Client can't fake timestamps ✅
+- Type system enforces correctness ✅
+
+#### 7. **UpdateUser DTO**
+```rust
+#[derive(Debug, Deserialize)]
+pub struct UpdateUser {
+    pub name: Option<String>,
+    pub email: Option<String>,
+    pub age: Option<i32>,
+}
+```
+- **All fields `Option<T>`**: Update only specified fields
+- **Flexible**: Can update name only, or email + age, etc.
+- **Type-safe**: Can't update invalid fields
+
+#### 8. **SQLx FromRow**
+```rust
+#[derive(FromRow)]
+```
+Automatically maps SQL columns to Rust fields:
+```sql
+SELECT id, name, email, age, created_at, updated_at FROM users;
+```
+→ Becomes `User` struct ✨
+
+**Rules:**
+- Field names must match column names
+- Types must be compatible
+- Compile-time checking with `query_as!` macro
+
+#### 9. **Module Exports**
+```rust
+// src/models/mod.rs
+pub mod user;
+pub use user::{CreateUser, UpdateUser, User};
+```
+
+**Now you can:**
+```rust
+use rust_crud::models::User;          // ✅
+use rust_crud::models::{User, CreateUser}; // ✅
+```
+
+Instead of:
+```rust
+use rust_crud::models::user::User;    // ❌ Longer
+```
+
+**Key Dependencies Added:**
+- `serde = { version = "1.0", features = ["derive"] }` - JSON serialization
+- `chrono = { version = "0.4", features = ["serde"] }` - Datetime handling
+
+**New Files Created:**
+- `src/models/mod.rs` - Module exports
+- `src/models/user.rs` - User model and DTOs
+
+**What Works Now:**
+- ✅ User struct represents database row
+- ✅ Automatic JSON serialization
+- ✅ Type-safe database mapping
+- ✅ DTOs for create/update operations
+- ✅ Timestamp handling with timezone
+- ✅ Optional fields with `Option<T>`
+
+**Type Safety Benefits:**
+```rust
+// Won't compile! ✋
+let user = User {
+    id: "not a number",  // ❌ Type error: expected i32
+    name: 123,           // ❌ Type error: expected String
+    age: 25,             // ❌ Type error: expected Option<i32>
+};
+
+// Correct! ✅
+let user = User {
+    id: 1,
+    name: "Alice".to_string(),
+    age: Some(25),       // ✅ Optional value
+    // ... rest
+};
+```
+
+**Next Up:** Implement POST endpoint to create users!
 
 ---
 
