@@ -13,7 +13,7 @@ This document tracks key learnings from building a REST API with Rust, Axum, and
 | 3 | PostgreSQL Connection | ✅ Complete | Ready |
 | 4 | Database Schema | ✅ Complete | Ready |
 | 5 | User Struct | ✅ Complete | Ready |
-| 6 | Create User (POST) | ⏳ Not Started | - |
+| 6 | Create User (POST) | ✅ Complete | Ready |
 | 7 | Get User (GET) | ⏳ Not Started | - |
 | 8 | Update User (PUT) | ⏳ Not Started | - |
 | 9 | Delete User (DELETE) | ⏳ Not Started | - |
@@ -634,6 +634,187 @@ let user = User {
 ```
 
 **Next Up:** Implement POST endpoint to create users!
+
+---
+
+### Step 6: Create User Endpoint (POST) ✅
+
+**Goal:** Implement POST /users endpoint to create new users in the database.
+
+**What I Learned:**
+
+#### 1. **HTTP POST Handler**
+```rust
+pub async fn create_user(
+    State(pool): State<PgPool>,
+    Json(payload): Json<CreateUser>,
+) -> Result<(StatusCode, Json<User>), (StatusCode, String)>
+```
+
+**Breaking it down:**
+- `State<PgPool>`: Get database pool from Axum state
+- `Json<CreateUser>`: Automatically deserialize JSON request body to CreateUser
+- Returns `Result<Success, Error>`
+- **Success**: `(StatusCode::CREATED, Json<User>)` - 201 status + created user
+- **Error**: `(StatusCode, String)` - Error status + message
+
+#### 2. **SQLx query_as**
+```rust
+let user = sqlx::query_as::<_, User>(
+    r#"
+    INSERT INTO users (name, email, age)
+    VALUES ($1, $2, $3)
+    RETURNING id, name, email, age, created_at, updated_at
+    "#,
+)
+.bind(&payload.name)
+.bind(&payload.email)
+.bind(payload.age)
+.fetch_one(&pool)
+.await?;
+```
+
+**Key parts:**
+- **`query_as::<_, User>`**: Type annotation tells SQLx to map result to User struct
+- **`r#"..."`#**: Raw string literal (no need to escape quotes)
+- **`$1, $2, $3`**: Positional parameters (prevents SQL injection!)
+- **`.bind()`**: Bind values to parameters in order
+- **`RETURNING *`**: Get the inserted row back (with generated id!)
+- **`.fetch_one()`**: Expect exactly one row back
+- **`.await?`**: Wait for query + propagate errors with `?`
+
+#### 3. **RETURNING Clause**
+```sql
+INSERT INTO users (name, email, age)
+VALUES ($1, $2, $3)
+RETURNING id, name, email, age, created_at, updated_at
+```
+
+**Why RETURNING is awesome:**
+- Database generates `id` (SERIAL auto-increment)
+- Database sets timestamps with `DEFAULT`
+- Get all values back in one roundtrip
+- No need for separate SELECT query!
+
+#### 4. **Error Handling**
+```rust
+.map_err(|e| {
+    eprintln!("Database error: {:?}", e);
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("Failed to create user: {}", e),
+    )
+})?;
+```
+
+- **`.map_err()`**: Transform database error to HTTP error
+- **`eprintln!()`**: Log error to console for debugging
+- **500 error**: Server error (not client's fault)
+- **Error message**: Helpful for debugging
+
+#### 5. **HTTP Status Codes**
+```rust
+StatusCode::CREATED  // 201 - Resource created successfully
+StatusCode::INTERNAL_SERVER_ERROR  // 500 - Server error
+```
+
+- **201 Created**: Successful creation (better than 200 OK)
+- **Semantic**: Different codes have different meanings
+- **Axum provides**: All standard HTTP status codes
+
+#### 6. **JSON Request/Response**
+**Request (automatic):**
+```json
+{
+  "name": "Alice",
+  "email": "alice@example.com",
+  "age": 25
+}
+```
+→ Axum deserializes to `CreateUser` ✨
+
+**Response (automatic):**
+```rust
+Json(user)  // User struct
+```
+→ Axum serializes to JSON ✨
+```json
+{
+  "id": 1,
+  "name": "Alice", 
+  "email": "alice@example.com",
+  "age": 25,
+  "created_at": "2025-12-14T20:55:40.298920Z",
+  "updated_at": "2025-12-14T20:55:40.298920Z"
+}
+```
+
+#### 7. **SQL Injection Prevention**
+```rust
+// ❌ NEVER DO THIS! (SQL injection vulnerability)
+let query = format!("INSERT INTO users VALUES ('{}')", payload.name);
+
+// ✅ ALWAYS DO THIS! (safe with parameterized query)
+.bind(&payload.name)  // SQLx handles escaping
+```
+
+- **Parameterized queries**: $1, $2, etc.
+- **SQLx escapes**: Prevents injection attacks
+- **Type-safe**: Compile-time checking with macros
+
+#### 8. **Adding chrono Feature**
+```toml
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "macros", "chrono"] }
+```
+
+- **"chrono" feature**: Enables DateTime<Utc> support
+- Without this: Can't map TIMESTAMP to DateTime
+- SQLx integrates with chrono automatically
+
+**New Files Created:**
+- `src/handlers/users.rs` - Users CRUD handlers
+
+**Modified Files:**
+- `src/handlers/mod.rs` - Export users module
+- `src/routes.rs` - Add POST /users route
+- `Cargo.toml` - Add chrono feature to sqlx
+
+**What Works Now:**
+- ✅ POST /users creates users
+- ✅ Database generates id and timestamps
+- ✅ JSON request/response automatic
+- ✅ Error handling with proper status codes
+- ✅ SQL injection protection
+- ✅ Type-safe database queries
+
+**Testing:**
+```bash
+# Create user with age
+curl -X POST http://127.0.0.1:3000/users \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice", "email": "alice@example.com", "age": 25}'
+
+# Response: 
+# {"id":1,"name":"Alice","email":"alice@example.com","age":25,...}
+
+# Create user without age (optional field)
+curl -X POST http://127.0.0.1:3000/users \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Bob", "email": "bob@example.com"}'
+
+# Response: 
+# {"id":2,"name":"Bob","email":"bob@example.com","age":null,...}
+```
+
+**Database Verification:**
+```sql
+SELECT * FROM users;
+-- id | name  | email             | age |  created_at  | updated_at
+-- 1  | Alice | alice@example.com | 25  | 2025-12-14...| 2025-12-14...
+-- 2  | Bob   | bob@example.com   | null| 2025-12-14...| 2025-12-14...
+```
+
+**Next Up:** Implement GET /users/:id to fetch a user by ID!
 
 ---
 
